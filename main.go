@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 )
 
 // album represents data about a record album.
@@ -67,6 +68,28 @@ func processCsvFile(records *[][]string) []track {
 	return recs
 }
 
+type ApplicationCounter struct {
+	sync.RWMutex
+	count int
+}
+
+func (f *ApplicationCounter) incr() {
+	f.Lock()
+	f.count++
+	f.Unlock()
+}
+
+func Incr() {
+	globalCounter.incr()
+}
+
+// TODO: is it safe way to return counter
+func Count() int {
+	return globalCounter.count
+}
+
+var globalCounter = &ApplicationCounter{}
+
 func main() {
 	router := gin.Default()
 	router.GET("/albums", getAlbums)
@@ -74,7 +97,14 @@ func main() {
 	router.POST("/albums", postAlbums)
 	router.GET("/tracks", getTracks)
 
+	router.GET("/counter", getCounts)
+
 	router.Run("localhost:8080")
+}
+
+func getCounts(c *gin.Context) {
+	Incr()
+	c.IndentedJSON(http.StatusOK, Count())
 }
 
 // getAlbums responds with the list of all albums as JSON.
