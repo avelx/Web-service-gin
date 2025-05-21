@@ -1,9 +1,11 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/csv"
 	"fmt"
 	"github.com/gin-gonic/gin"
+	"github.com/go-sql-driver/mysql"
 	"log"
 	"net/http"
 	"os"
@@ -90,14 +92,73 @@ func Count() int {
 
 var globalCounter = &ApplicationCounter{}
 
+type Album struct {
+	ID     int64   `json:"ID"`
+	Title  string  `json:"Title"`
+	Artist string  `json:"Artist"`
+	Price  float32 `json:"Price"`
+}
+
+// albumsByArtist queries for albums that have the specified artist name.
+func albumsByArtist(name string) ([]Album, error) {
+	// An albums slice to hold data from returned rows.
+	var albums []Album
+
+	rows, err := db.Query("SELECT * FROM album WHERE  artist LIKE '%' || ? || '%' ", name)
+	if err != nil {
+		return nil, fmt.Errorf("albumsByArtist %q: %v", name, err)
+	}
+	defer rows.Close()
+	// Loop through rows, using Scan to assign column data to struct fields.
+	for rows.Next() {
+		var alb Album
+		if err := rows.Scan(&alb.ID, &alb.Title, &alb.Artist, &alb.Price); err != nil {
+			return nil, fmt.Errorf("albumsByArtist %q: %v", name, err)
+		}
+		albums = append(albums, alb)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("albumsByArtist %q: %v", name, err)
+	}
+	return albums, nil
+}
+
+var cfg = mysql.NewConfig()
+var db *sql.DB
+
+func configureDb() {
+	cfg.User = "root"
+	cfg.Passwd = "password123"
+	//cfg.User = os.Getenv("root")
+	//cfg.Passwd = os.Getenv("password123")
+	cfg.Net = "tcp"
+	cfg.Addr = "127.0.0.1:3306"
+	cfg.DBName = "recordings"
+}
+
+func connectDb() {
+	var err error
+	db, err = sql.Open("mysql", cfg.FormatDSN())
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
 func main() {
 	router := gin.Default()
 	router.GET("/albums", getAlbums)
 	router.GET("/albums/:id", getAlbumByID)
+	router.GET("/albumsByName/:name", getAlbumByName)
 	router.POST("/albums", postAlbums)
 	router.GET("/tracks", getTracks)
-
 	router.GET("/counter", getCounts)
+
+	// Db section: Refs => https://go.dev/doc/tutorial/database-access
+	// Capture connection properties.
+	configureDb()
+	connectDb()
+
+	fmt.Println("Connected!")
 
 	router.Run("localhost:8080")
 }
@@ -146,4 +207,18 @@ func getAlbumByID(c *gin.Context) {
 		}
 	}
 	c.IndentedJSON(http.StatusNotFound, gin.H{"message": "album not found"})
+}
+
+// getAlbumByName
+func getAlbumByName(c *gin.Context) {
+	name := c.Param("name")
+
+	albums, err := albumsByArtist(name)
+	fmt.Printf("Albums found: %v\n", albums)
+	if err != nil {
+		log.Fatal(err)
+		c.IndentedJSON(http.StatusNotFound, gin.H{"message": "album not found"})
+	}
+	c.IndentedJSON(http.StatusOK, albums)
+	//fmt.Printf("Albums found: %v\n", albums)
 }
